@@ -1,0 +1,230 @@
+#include <iostream>
+#include <string>
+#include <vector>
+#include <stdexcept>
+#include <cstring>
+#include <cstdlib>
+#include <fstream>
+
+#ifdef _WIN32
+#include <winsock2.h>
+#include <ws2tcpip.h>
+#pragma comment(lib, "ws2_32.lib")
+#else
+#include <arpa/inet.h>
+#include <netinet/in.h>
+#include <sys/socket.h>
+#include <unistd.h>
+#endif
+
+#include <openssl/ssl.h>
+#include <openssl/err.h>
+
+namespace {
+#ifdef _WIN32
+using socket_t = SOCKET;
+const socket_t kInvalidSocket = INVALID_SOCKET;
+#else
+using socket_t = int;
+const socket_t kInvalidSocket = -1;
+#endif
+
+void platform_startup()
+{
+#ifdef _WIN32
+    WSADATA wsaData;
+    if (WSAStartup(MAKEWORD(2, 2), &wsaData) != 0) {
+        throw std::runtime_error("WSAStartup failed");
+    }
+#endif
+}
+struct ClientConfig {
+    std::string address;
+    uint16_t port{};
+    std::string ca_cert;
+};
+
+std::string trim(const std::string &s)
+{
+    const char *ws = " \t\r\n";
+    size_t start = s.find_first_not_of(ws);
+    if (start == std::string::npos) return "";
+    size_t end = s.find_last_not_of(ws);
+    return s.substr(start, end - start + 1);
+}
+uint16_t parse_port(const std::string &text)
+{
+    int value = std::stoi(text);
+    if (value < 0 || value > 65535) {
+        throw std::runtime_error("Port must be between 0 and 65535");
+    }
+    return static_cast<uint16_t>(value);
+}
+ClientConfig load_config_file(const std::string &path)
+{
+    std::ifstream in(path);
+    if (!in.is_open()) {
+        throw std::runtime_error("Could not open config file: " + path);
+    }
+
+    std::string line;
+    std::string address, ca_cert, port_text;
+    while (std::getline(in, line)) {
+        line = trim(line);
+        if (line.empty() || line[0] == '#') continue;
+        auto pos = line.find('=');
+        if (pos == std::string::npos) continue;
+        std::string key = trim(line.substr(0, pos));
+        std::string value = trim(line.substr(pos + 1));
+        if (key == "server_address") address = value;
+        else if (key == "port") port_text = value;
+        else if (key == "ca_cert") ca_cert = value;
+    }
+
+    if (address.empty() || port_text.empty() || ca_cert.empty()) {
+        throw std::runtime_error("Config missing required fields: server_address, port, ca_cert");
+    }
+
+    ClientConfig cfg;
+    cfg.address = address;
+    cfg.port = parse_port(port_text);
+    cfg.ca_cert = ca_cert;
+    return cfg;
+}
+void platform_cleanup()
+{
+#ifdef _WIN32
+    WSACleanup();
+#endif
+}
+
+void close_socket(socket_t s)
+{
+#ifdef _WIN32
+    closesocket(s);
+#else
+    close(s);
+#endif
+}
+
+[[noreturn]] void die(const std::string &msg)
+{
+    std::cerr << msg << "\n";
+    ERR_print_errors_fp(stderr);
+    platform_cleanup();
+    std::exit(EXIT_FAILURE);
+}
+
+socket_t create_connected_socket(const std::string &address, uint16_t port)
+{
+    socket_t sock = socket(AF_INET, SOCK_STREAM, 0);
+    if (sock == kInvalidSocket) {
+        throw std::runtime_error("socket() failed");
+    }
+
+    sockaddr_in addr{};
+    addr.sin_family = AF_INET;
+    addr.sin_port = htons(port);
+    if (inet_pton(AF_INET, address.c_str(), &addr.sin_addr) != 1) {
+        close_socket(sock);
+        throw std::runtime_error("inet_pton() failed - check IP address");
+    }
+
+    if (connect(sock, reinterpret_cast<sockaddr *>(&addr), sizeof(addr)) < 0) {
+        close_socket(sock);
+        throw std::runtime_error("connect() failed");
+    }
+
+    return sock;
+}
+
+void configure_ssl_ctx(SSL_CTX *ctx, const std::string &ca_cert_path)
+{
+    SSL_CTX_set_verify(ctx, SSL_VERIFY_PEER, nullptr);
+    SSL_CTX_set_verify_depth(ctx, 4);
+
+    if (SSL_CTX_load_verify_locations(ctx, ca_cert_path.c_str(), nullptr) != 1) {
+        die("Failed to load CA certificate for verification");
+    }
+}
+}
+
+int main(int argc, char *argv[])
+{
+    if (argc != 4 && !(argc == 3 && std::string(argv[1]) == "--config")) {
+        std::cout << "Usage (direct): client <server-address> <port> <ca_cert.pem>\n";
+        std::cout << "Usage (config): client --config client.conf\n";
+        std::cout << "Example config keys: server_address, port, ca_cert (use full path for PEM)\n";
+        return 1;
+    }
+    ClientConfig config;
+    if (std::string(argv[1]) == "--config") {
+        try {
+            config = load_config_file(argv[2]);
+        } catch (const std::exception &ex) {
+            std::cerr << "Error loading config file: " << ex.what() << "\n";
+            return 1;
+        }
+    } else {
+        config.address = argv[1];
+        config.port = static_cast<uint16_t>(std::stoi(argv[2]));
+        config.ca_cert = argv[3];
+    }   
+
+    try {
+        platform_startup(); // Required on Windows; no-op on Linux/macOS
+    } catch (const std::exception &ex) {
+        std::cerr << ex.what() << "\n";
+        return 1;
+    }
+
+    SSL_load_error_strings();   // Human-readable OpenSSL errors
+    OpenSSL_add_ssl_algorithms(); // Register TLS algorithms
+
+    const SSL_METHOD *method = TLS_client_method();
+    SSL_CTX *ctx = SSL_CTX_new(method);
+    if (!ctx) {
+        die("Unable to create SSL context");
+    }
+
+    configure_ssl_ctx(ctx, config.ca_cert); // Load trusted CA / server cert
+
+    socket_t sock;
+    try {
+        sock = create_connected_socket(config.address, config.port); // Open TCP connection
+    } catch (const std::exception &ex) {
+        die(ex.what());
+    }
+
+    SSL *ssl = SSL_new(ctx);
+    SSL_set_fd(ssl, static_cast<int>(sock)); // Tie TLS layer to TCP socket
+
+    if (SSL_connect(ssl) <= 0) {
+        close_socket(sock);
+        SSL_free(ssl);
+        SSL_CTX_free(ctx);
+        die("TLS handshake failed (certificate mismatch?)");
+    }
+
+    std::cout << "Connected to server with cipher: " << SSL_get_cipher(ssl) << "\n";
+
+    char buffer[256]{};
+    int bytes = SSL_read(ssl, buffer, sizeof(buffer) - 1);
+    if (bytes > 0) {
+        buffer[bytes] = '\0';
+        std::cout << "Server says: " << buffer << "\n";
+    }
+
+    const char *reply = "Thanks, TLS server!"; // Simple demo payload
+    SSL_write(ssl, reply, static_cast<int>(std::strlen(reply)));
+
+    SSL_shutdown(ssl);
+    SSL_free(ssl);
+    close_socket(sock);
+    SSL_CTX_free(ctx);
+    EVP_cleanup();
+    platform_cleanup();
+
+    std::cout << "Client finished.\n";
+    return 0;
+}
