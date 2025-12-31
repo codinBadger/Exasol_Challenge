@@ -80,13 +80,6 @@ void ExasolClient::connect() {
                 std::cout << "Connected to server with cipher: " << get_cipher()
                           << " on port " << port_to_try
                           << " (attempt " << attempt << ")\n";
-
-                // Proactively send EHLO in case server expects client-first greeting
-                try {
-                    ssl_manager_->write("EHLO\n");
-                } catch (const std::exception& ex) {
-                    std::cerr << "Failed to send initial greeting: " << ex.what() << "\n";
-                }
                 return;
             } catch (const std::exception& ex) {
                 if (socket_manager_->is_valid(socket_)) {
