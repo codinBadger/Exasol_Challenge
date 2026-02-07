@@ -17,8 +17,6 @@ echo -e "${GREEN}==================================${NC}"
 OS="unknown"
 if [[ "$OSTYPE" == "linux-gnu"* ]]; then
     OS="linux"
-elif [[ "$OSTYPE" == "darwin"* ]]; then
-    OS="macos"
 elif [[ "$OSTYPE" == "msys" ]] || [[ "$OSTYPE" == "cygwin" ]]; then
     OS="windows"
 fi

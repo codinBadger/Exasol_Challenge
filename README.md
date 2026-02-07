@@ -125,11 +125,6 @@ port=8443
 ca_cert=C:\path\to\ca_cert.pem
 ```
 
-## Documentation
-
-- [BUILD.md](BUILD.md) - Detailed cross-platform build instructions
-- [KT_DOCUMENT.md](KT_DOCUMENT.md) - Complete knowledge transfer documentation
-- [SOLID_PRINCIPLES.md](SOLID_PRINCIPLES.md) - SOLID principles implementation guide
 
 ## Requirements
 
