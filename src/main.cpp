@@ -12,22 +12,52 @@ using namespace exasol;
 void print_usage() {
     std::cout << "Usage (direct):     ExasolClient <server-address> <port> <ca_cert.pem>\n";
     std::cout << "Usage (config):     ExasolClient --config <config-file>\n";
-    std::cout << "Usage (benchmark):  ExasolClient --benchmark\n";
+    std::cout << "Usage (benchmark):  ExasolClient --benchmark [difficulty]\n";
+    std::cout << "Usage (test SHA1):  ExasolClient --test-sha1\n";
     std::cout << "\nExamples:\n";
     std::cout << "  ExasolClient 127.0.0.1 8443 cert.pem\n";
     std::cout << "  ExasolClient --config config/client.conf\n";
-    std::cout << "  ExasolClient --benchmark\n";
+    std::cout << "  ExasolClient --benchmark      # default difficulty 9\n";
+    std::cout << "  ExasolClient --benchmark 6    # custom difficulty\n";
+    std::cout << "  ExasolClient --test-sha1\n";
 }
 
 int main(int argc, char* argv[]) {
     try {
         // Handle benchmark mode (no network required)
-        if (argc == 2 && std::string(argv[1]) == "--benchmark") {
+        if (argc >= 2 && std::string(argv[1]) == "--benchmark") {
             std::cout << "\n========================================\n";
             std::cout << "  EXASOL CLIENT - PERFORMANCE BENCHMARK\n";
             std::cout << "========================================\n\n";
-            ExasolClient::run_all_benchmarks();
+            
+            int difficulty = 9;  // default
+            if (argc >= 3) {
+                difficulty = std::stoi(argv[2]);
+            }
+            
+            std::string authdata = "jkjGGJLLMsyCwEvGXxFXaOnorfQiEaSpjkFprqBAXNuiRdUpKJSsSEQMbiWGXtAk";
+            
+            // Run both POW and POW2 benchmarks
+            std::cout << "\n--- Testing POW (sha1_raw) ---\n";
+            ExasolClient::benchmark_pow_solving(authdata, difficulty, true, ExasolClient::PowStrategy::Counter);
+            
+            std::cout << "\n--- Testing POW2 (SHA1Precomputed) ---\n";
+            ExasolClient::benchmark_pow2_solving(authdata, difficulty, true, ExasolClient::PowStrategy::Counter);
+            
+            std::cout << "\n========================================\n";
+            std::cout << "  BENCHMARK COMPARISON COMPLETE\n";
+            std::cout << "========================================\n\n";
             return 0;
+        }
+        
+        // Handle SHA1 implementation test mode
+        if (argc == 2 && std::string(argv[1]) == "--test-sha1") {
+            std::cout << "\n========================================\n";
+            std::cout << "  EXASOL CLIENT - SHA1 IMPLEMENTATION TEST\n";
+            std::cout << "========================================\n";
+            bool passed = ExasolClient::test_sha1_implementations();
+            ExasolClient::compare_sha1_performance();
+            return passed ? 0 : 1;
         }
         
         std::unique_ptr<IConfigLoader> config_loader;

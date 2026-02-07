@@ -19,10 +19,8 @@ public:
     socket_t connect(const std::string& address, uint16_t port) override;
     void close(socket_t socket) override;
     bool is_valid(socket_t socket) const override;
-
 private:
-    class Impl;
-    std::unique_ptr<Impl> pImpl_;
+    // Minimal concrete implementation is provided in a single compilation unit.
 };
 
 } // namespace exasol

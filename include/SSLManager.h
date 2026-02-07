@@ -24,7 +24,6 @@ public:
     void write(const std::string& data) override;
     std::string get_cipher() const override;
     void shutdown() override;
-
 private:
     class Impl;
     std::unique_ptr<Impl> pImpl_;

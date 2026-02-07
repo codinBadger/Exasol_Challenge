@@ -45,7 +45,12 @@ public:
     // Performance Testing Methods
     static void benchmark_suffix_generation();
     static void benchmark_pow_solving(const std::string& authdata, int difficulty, bool use_multithreading, PowStrategy strategy);
+    static void benchmark_pow2_solving(const std::string& authdata, int difficulty, bool use_multithreading, PowStrategy strategy);
     static void run_all_benchmarks();
+    
+    // SHA-NI Implementation Testing
+    static bool test_sha1_implementations();
+    static void compare_sha1_performance();
 
 private:
     std::unique_ptr<IConfigLoader> config_loader_;

@@ -26,10 +26,7 @@ endif()
 set(CLIENT_SOURCES
     src/main.cpp
     src/ExasolClient.cpp
-    src/FileConfigLoader.cpp
-    src/CLIConfigLoader.cpp
-    src/SocketManager.cpp
-    src/SSLManager.cpp
+    # Implementations moved into src/ExasolClient.cpp for a bare-metal single-file approach
 )
 
 # Header files (for IDE organization)
@@ -85,11 +82,25 @@ elseif(APPLE)
     message(STATUS "macOS detected")
 endif()
 
-# Compiler warnings
+# Compiler warnings and SHA-NI support
 if(MSVC)
     target_compile_options(ExasolClient PRIVATE /W4)
+    # MSVC: Enable AVX2 which includes SHA-NI support detection
+    target_compile_options(ExasolClient PRIVATE /arch:AVX2)
+    message(STATUS "MSVC: Enabled AVX2 (includes SHA-NI runtime detection)")
 else()
     target_compile_options(ExasolClient PRIVATE -Wall -Wextra -Wpedantic)
+    # GCC/Clang: Enable SHA-NI intrinsics
+    include(CheckCXXCompilerFlag)
+    check_cxx_compiler_flag("-msha" COMPILER_SUPPORTS_SHA)
+    check_cxx_compiler_flag("-msse4.1" COMPILER_SUPPORTS_SSE41)
+    if(COMPILER_SUPPORTS_SHA AND COMPILER_SUPPORTS_SSE41)
+        target_compile_options(ExasolClient PRIVATE -msha -msse4.1 -msse4.2)
+        target_compile_definitions(ExasolClient PRIVATE __SHA__=1)
+        message(STATUS "GCC/Clang: Enabled SHA-NI intrinsics (-msha -msse4.1)")
+    else()
+        message(STATUS "SHA-NI not supported by compiler, using OpenSSL fallback")
+    endif()
 endif()
 
 # Set output directories
